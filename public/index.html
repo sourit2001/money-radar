@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Money Radar</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Money Radar</h1>
+        <p id="summary">Loading Reddit opportunity posts...</p>
+      </div>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+
+    <main class="layout">
+      <aside class="filters" aria-label="Filters">
+        <label>
+          Channel
+          <select id="channel">
+            <option value="">All channels</option>
+          </select>
+        </label>
+        <label>
+          Subreddit
+          <select id="subreddit">
+            <option value="">All subreddits</option>
+          </select>
+        </label>
+        <label>
+          Minimum score
+          <input id="min-score" type="range" min="1" max="5" value="4" />
+          <span id="score-label">4+</span>
+        </label>
+        <label>
+          Search
+          <input id="search" type="search" placeholder="tool, budget, automate..." />
+        </label>
+      </aside>
+
+      <section id="posts" class="posts" aria-live="polite"></section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
