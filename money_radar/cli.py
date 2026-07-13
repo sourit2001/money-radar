@@ -12,6 +12,7 @@ from pathlib import Path
 from .annotator import annotate_post
 from .config import DEFAULT_DB_PATH, SUBREDDIT_TO_CHANNEL
 from .filters import assess_opportunity, is_candidate_post
+from .obsidian import export_obsidian_markdown
 from .reddit import RedditFetchError, clean_html_text, fetch_candidate_posts
 from .server import serve
 from .storage import connect, init_db, upsert_posts
@@ -185,6 +186,18 @@ def command_refilter(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_export_obsidian(args: argparse.Namespace) -> int:
+    output_path = export_obsidian_markdown(
+        db_path_from_args(args),
+        args.target_dir,
+        min_score=args.min_score,
+        limit=args.limit,
+        filename=args.filename,
+    )
+    print(f"Exported Obsidian report to {output_path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local Reddit opportunity radar")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite database path")
@@ -210,6 +223,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--prune", action="store_true", help="Delete posts rejected by the current rules"
     )
     refilter_parser.set_defaults(func=command_refilter)
+
+    export_parser = subparsers.add_parser(
+        "export-obsidian", help="Export saved posts to an Obsidian-friendly Markdown report"
+    )
+    export_parser.add_argument("target_dir", help="Directory where the Markdown report should be written")
+    export_parser.add_argument("--min-score", type=int, default=4)
+    export_parser.add_argument("--limit", type=int, default=50)
+    export_parser.add_argument("--filename", default="Money Radar Latest.md")
+    export_parser.set_defaults(func=command_export_obsidian)
 
     serve_parser = subparsers.add_parser("serve", help="Run the local web server")
     serve_parser.add_argument("--host", default="127.0.0.1")

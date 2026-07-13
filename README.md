@@ -47,9 +47,16 @@ python3 -m money_radar.cli refilter          # preview
 python3 -m money_radar.cli refilter --prune  # remove rejected noise
 ```
 
+To export the current shortlist to Obsidian:
+
+```bash
+python3 -m money_radar.cli export-obsidian \
+  '/Users/lizhu/Library/Mobile Documents/iCloud~md~obsidian/Documents/my ai work副本/Reddit Money Radar'
+```
+
 ## Notes
 
-- **Rate Limits**: Reddit RSS has strict rate limits. The fetch command waits ~10 seconds between requests to avoid being blocked. A full scan of all subreddits + search queries takes about 5 minutes.
+- **Rate Limits**: Reddit RSS has strict rate limits. The fetch command waits between requests to avoid being blocked. A full scan of all grouped subreddit feeds + search queries can take several minutes.
 - **No engagement data from RSS**: RSS feeds do not include upvote or comment
   counts. Missing engagement is treated as unknown; a post still has to pass
   the stricter multi-signal content assessment.
@@ -57,4 +64,20 @@ python3 -m money_radar.cli refilter --prune  # remove rejected noise
 
 ## Daily Run
 
-For the MVP, run `python3 -m money_radar.cli fetch` manually once per day. After the subreddit and keyword quality looks good, this can be scheduled with cron or launchd.
+For a manual daily run:
+
+```bash
+python3 -m money_radar.cli fetch
+python3 -m money_radar.cli refilter --prune
+python3 -m money_radar.cli export-obsidian \
+  '/Users/lizhu/Library/Mobile Documents/iCloud~md~obsidian/Documents/my ai work副本/Reddit Money Radar'
+```
+
+For macOS automation, copy `automation/money-radar/` to
+`/Users/lizhu/Automations/money-radar/`, install
+`com.lizhu.money-radar.plist` into `~/Library/LaunchAgents/`, and load it with
+`launchctl`. The provided LaunchAgent runs every day at 08:30 and writes:
+
+```text
+/Users/lizhu/Library/Mobile Documents/iCloud~md~obsidian/Documents/my ai work副本/Reddit Money Radar/Money Radar Latest.md
+```
