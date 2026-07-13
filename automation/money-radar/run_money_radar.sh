@@ -8,6 +8,8 @@ LOG_DIR="/private/tmp/com.lizhu.money-radar"
 VAULT_DIR="$APP_DIR/obsidian"
 REPO_URL="https://github.com/sourit2001/money-radar.git"
 LOCK_DIR="$APP_DIR/run.lock"
+REPORT_DATE="$(TZ=Asia/Shanghai date '+%Y-%m-%d')"
+REPORT_FILENAME="Money Radar ${REPORT_DATE}.md"
 
 mkdir -p "$APP_DIR" "$APP_DIR/data" "$LOG_DIR" "$VAULT_DIR"
 
@@ -33,7 +35,7 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
   python3 -m money_radar.cli --db "$DB_PATH" fetch
   python3 -m money_radar.cli --db "$DB_PATH" refilter --prune
-  python3 -m money_radar.cli --db "$DB_PATH" export-obsidian "$VAULT_DIR" --min-score 4 --limit 50
+  python3 -m money_radar.cli --db "$DB_PATH" export-obsidian "$VAULT_DIR" --min-score 4 --limit 50 --filename "$REPORT_FILENAME"
 
   echo "===== completed ====="
 } >> "$LOG_DIR/run.log" 2>&1

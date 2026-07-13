@@ -76,18 +76,20 @@ python3 -m money_radar.cli export-obsidian \
 For macOS automation, copy `automation/money-radar/` to
 `/Users/lizhu/Automations/money-radar/`, install
 `com.lizhu.money-radar.plist` into `~/Library/LaunchAgents/`, and load it with
-`launchctl`. The provided LaunchAgent runs every day at 08:30 and writes a
-local Markdown report:
+`launchctl`. The provided LaunchAgent runs every day at 04:00 Beijing time
+when the Mac is awake and writes a
+dated local Markdown report:
 
 ```text
-/Users/lizhu/Automations/money-radar/obsidian/Money Radar Latest.md
+/Users/lizhu/Automations/money-radar/obsidian/Money Radar YYYY-MM-DD.md
 ```
 
-On this Mac, that file is hard-linked into the iCloud Obsidian vault at:
+On this Mac, that local export directory is linked into the iCloud Obsidian
+vault at:
 
 ```text
-/Users/lizhu/Library/Mobile Documents/iCloud~md~obsidian/Documents/my ai work副本/Reddit Money Radar/Money Radar Latest.md
+/Users/lizhu/Library/Mobile Documents/iCloud~md~obsidian/Documents/my ai work副本/Reddit Money Radar/
 ```
 
-The hard-link keeps LaunchAgent writes out of iCloud's FileProvider permission
-path while still letting Obsidian see the latest report.
+The directory link keeps LaunchAgent writes out of iCloud's FileProvider
+permission path while still letting Obsidian see each dated report.
