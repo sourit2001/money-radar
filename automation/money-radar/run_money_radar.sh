@@ -5,7 +5,7 @@ APP_DIR="/Users/lizhu/Automations/money-radar"
 REPO_DIR="$APP_DIR/repo"
 DB_PATH="$APP_DIR/data/money_radar.sqlite3"
 LOG_DIR="/private/tmp/com.lizhu.money-radar"
-VAULT_DIR="/Users/lizhu/Library/Mobile Documents/iCloud~md~obsidian/Documents/my ai work副本/Reddit Money Radar"
+VAULT_DIR="$APP_DIR/obsidian"
 REPO_URL="https://github.com/sourit2001/money-radar.git"
 LOCK_DIR="$APP_DIR/run.lock"
 
