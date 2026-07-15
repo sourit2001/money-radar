@@ -193,6 +193,7 @@ def command_export_obsidian(args: argparse.Namespace) -> int:
         min_score=args.min_score,
         limit=args.limit,
         filename=args.filename,
+        bilingual=args.bilingual,
     )
     print(f"Exported Obsidian report to {output_path}")
     return 0
@@ -231,6 +232,9 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--min-score", type=int, default=4)
     export_parser.add_argument("--limit", type=int, default=50)
     export_parser.add_argument("--filename", default="Money Radar Latest.md")
+    export_parser.add_argument(
+        "--bilingual", action="store_true", help="Add offline Chinese translations with Argos"
+    )
     export_parser.set_defaults(func=command_export_obsidian)
 
     serve_parser = subparsers.add_parser("serve", help="Run the local web server")

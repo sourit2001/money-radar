@@ -40,9 +40,14 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
   cd "$REPO_DIR"
 
-  python3 -m money_radar.cli --db "$DB_PATH" fetch
-  python3 -m money_radar.cli --db "$DB_PATH" refilter --prune
-  python3 -m money_radar.cli --db "$DB_PATH" export-obsidian "$VAULT_DIR" --min-score 4 --limit 50 --filename "$REPORT_FILENAME"
+  PYTHON="$APP_DIR/.venv/bin/python3"
+  if [ ! -x "$PYTHON" ]; then
+    PYTHON="python3"
+  fi
+
+  "$PYTHON" -m money_radar.cli --db "$DB_PATH" fetch
+  "$PYTHON" -m money_radar.cli --db "$DB_PATH" refilter --prune
+  "$PYTHON" -m money_radar.cli --db "$DB_PATH" export-obsidian "$VAULT_DIR" --min-score 4 --limit 50 --filename "$REPORT_FILENAME" --bilingual
 
   echo "===== completed ====="
 } >> "$LOG_DIR/run.log" 2>&1

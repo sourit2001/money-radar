@@ -41,6 +41,15 @@ CREATE TABLE IF NOT EXISTS exported_posts (
 
 CREATE INDEX IF NOT EXISTS idx_exported_posts_report
 ON exported_posts(report_filename);
+
+CREATE TABLE IF NOT EXISTS translations (
+    source_hash TEXT NOT NULL,
+    target_language TEXT NOT NULL,
+    source_text TEXT NOT NULL,
+    translated_text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (source_hash, target_language)
+);
 """
 
 POST_FIELDS = [
@@ -196,6 +205,38 @@ def record_exported_posts(
         ON CONFLICT(reddit_id) DO NOTHING
         """,
         ((reddit_id, report_filename, exported_at) for reddit_id in reddit_ids),
+    )
+    conn.commit()
+
+
+def get_translation(
+    conn: sqlite3.Connection, source_hash: str, target_language: str
+) -> str | None:
+    row = conn.execute(
+        "SELECT translated_text FROM translations WHERE source_hash=? AND target_language=?",
+        (source_hash, target_language),
+    ).fetchone()
+    return row["translated_text"] if row else None
+
+
+def save_translation(
+    conn: sqlite3.Connection,
+    source_hash: str,
+    target_language: str,
+    source_text: str,
+    translated_text: str,
+    created_at: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO translations
+            (source_hash, target_language, source_text, translated_text, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(source_hash, target_language) DO UPDATE SET
+            translated_text=excluded.translated_text,
+            created_at=excluded.created_at
+        """,
+        (source_hash, target_language, source_text, translated_text, created_at),
     )
     conn.commit()
 

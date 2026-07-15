@@ -13,6 +13,7 @@ from .storage import (
     metadata,
     record_exported_posts,
 )
+from .translation import add_chinese_translations
 
 
 _REDDIT_ID_PATTERN = re.compile(r"reddit\.com/(?:r/[^/]+/)?comments/([^/?#]+)", re.IGNORECASE)
@@ -64,16 +65,18 @@ def render_obsidian_markdown(posts: list[dict], *, total_saved: int, min_score: 
 
     for index, post in enumerate(posts, start=1):
         title = _escape_markdown(post.get("title"))
+        title_zh = _escape_markdown(post.get("title_zh"))
         permalink = post.get("permalink") or post.get("url") or ""
         lines.extend(
             [
                 f"## {index}. {title}",
                 "",
-                f"- Score: {post.get('value_score', 1)}/5",
-                f"- Source: r/{_escape_markdown(post.get('subreddit'))} / {_escape_markdown(post.get('channel'))}",
-                f"- Posted: {_format_post_date(post.get('created_utc'))}",
-                f"- Signal: {_escape_markdown(post.get('signal'))}",
-                f"- Opportunity: {_escape_markdown(post.get('opportunity_type'))}",
+                *([f"**中文标题**：{title_zh}", ""] if title_zh and title_zh != title else []),
+                f"- Score / 评分: {post.get('value_score', 1)}/5",
+                f"- Source / 来源: r/{_escape_markdown(post.get('subreddit'))} / {_escape_markdown(post.get('channel'))}",
+                f"- Posted / 发布时间: {_format_post_date(post.get('created_utc'))}",
+                f"- Signal / 需求信号: {_escape_markdown(post.get('signal'))}",
+                f"- Opportunity / 机会类型: {_escape_markdown(post.get('opportunity_type'))}",
             ]
         )
         if permalink:
@@ -82,11 +85,17 @@ def render_obsidian_markdown(posts: list[dict], *, total_saved: int, min_score: 
         if phrase:
             lines.append(f"- Phrase: {phrase}")
         pain = _compact_text(post.get("pain_summary"), limit=360)
+        pain_zh = _compact_text(post.get("pain_summary_zh"), limit=360)
         if pain:
-            lines.extend(["", f"**Pain**: {pain}"])
+            lines.extend(["", f"**Pain / 痛点（原文）**：{pain}"])
+        if pain_zh and pain_zh != pain:
+            lines.append(f"**痛点（中文）**：{pain_zh}")
         body = _compact_text(post.get("selftext"), limit=900)
+        body_zh = _compact_text(post.get("selftext_zh"), limit=900)
         if body and body != pain:
-            lines.extend(["", body])
+            lines.extend(["", "**Post / 帖子原文**", "", body])
+        if body_zh and body_zh not in {body, pain_zh}:
+            lines.extend(["", "**中文翻译**", "", body_zh])
         lines.append("")
 
     return "\n".join(lines)
@@ -99,6 +108,7 @@ def export_obsidian_markdown(
     min_score: int = 4,
     limit: int = 50,
     filename: str = "Money Radar Latest.md",
+    bilingual: bool = False,
 ) -> Path:
     target = Path(target_dir).expanduser()
     target.mkdir(parents=True, exist_ok=True)
@@ -128,6 +138,8 @@ def export_obsidian_markdown(
         min_value_score=min_score,
         limit=limit,
     )
+    if bilingual:
+        add_chinese_translations(conn, posts)
     meta = metadata(conn)
 
     output_path = target / filename

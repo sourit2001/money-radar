@@ -29,8 +29,26 @@ class ObsidianExportTests(unittest.TestCase):
 
         self.assertIn("# Money Radar Latest", markdown)
         self.assertIn("## 1. Looking for invoice software", markdown)
-        self.assertIn("- Score: 5/5", markdown)
+        self.assertIn("- Score / 评分: 5/5", markdown)
         self.assertIn("Manual invoicing takes too long.", markdown)
+
+    def test_render_obsidian_markdown_includes_chinese_translation(self):
+        markdown = render_obsidian_markdown(
+            [{
+                "title": "Need a billing tool",
+                "title_zh": "需要一个账单工具",
+                "value_score": 5,
+                "pain_summary": "Billing takes too long.",
+                "pain_summary_zh": "账单处理耗时太长。",
+                "selftext": "I do this manually every week.",
+                "selftext_zh": "我每周都要手工完成。",
+            }],
+            total_saved=1,
+            min_score=4,
+        )
+        self.assertIn("**中文标题**：需要一个账单工具", markdown)
+        self.assertIn("**痛点（中文）**：账单处理耗时太长。", markdown)
+        self.assertIn("**中文翻译**", markdown)
 
     def test_export_obsidian_markdown_writes_file(self):
         with tempfile.TemporaryDirectory() as tmp:
