@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
-from .storage import connect, init_db, list_posts, metadata
+from .storage import (
+    connect,
+    init_db,
+    list_posts_for_report,
+    metadata,
+    record_exported_posts,
+)
+
+
+_REDDIT_ID_PATTERN = re.compile(r"reddit\.com/(?:r/[^/]+/)?comments/([^/?#]+)", re.IGNORECASE)
 
 
 def _escape_markdown(value: object) -> str:
@@ -90,17 +100,46 @@ def export_obsidian_markdown(
     limit: int = 50,
     filename: str = "Money Radar Latest.md",
 ) -> Path:
-    conn = connect(db_path)
-    init_db(conn)
-    posts = list_posts(conn, min_value_score=min_score, limit=limit)
-    meta = metadata(conn)
-    conn.close()
-
     target = Path(target_dir).expanduser()
     target.mkdir(parents=True, exist_ok=True)
+
+    conn = connect(db_path)
+    init_db(conn)
+
+    # Bootstrap delivery history from reports created before exported_posts was
+    # introduced, preventing a one-time replay after upgrading.
+    for report_path in sorted(target.glob("Money Radar *.md")):
+        try:
+            report_text = report_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        historical_ids = set(_REDDIT_ID_PATTERN.findall(report_text))
+        if historical_ids:
+            record_exported_posts(
+                conn,
+                historical_ids,
+                report_path.name,
+                datetime.fromtimestamp(report_path.stat().st_mtime, tz=timezone.utc).isoformat(),
+            )
+
+    posts = list_posts_for_report(
+        conn,
+        filename,
+        min_value_score=min_score,
+        limit=limit,
+    )
+    meta = metadata(conn)
+
     output_path = target / filename
     output_path.write_text(
         render_obsidian_markdown(posts, total_saved=meta["total"], min_score=min_score),
         encoding="utf-8",
     )
+    record_exported_posts(
+        conn,
+        (post["reddit_id"] for post in posts),
+        filename,
+        datetime.now(timezone.utc).isoformat(),
+    )
+    conn.close()
     return output_path

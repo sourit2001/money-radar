@@ -8,8 +8,18 @@
 
   <key>ProgramArguments</key>
   <array>
+    <string>/bin/zsh</string>
     <string>/Users/lizhu/Automations/money-radar/run_money_radar.sh</string>
   </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/lizhu/Automations/money-radar</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
 
   <key>StartCalendarInterval</key>
   <dict>

@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS idx_posts_channel ON posts(channel);
 CREATE INDEX IF NOT EXISTS idx_posts_subreddit ON posts(subreddit);
 CREATE INDEX IF NOT EXISTS idx_posts_value_score ON posts(value_score);
+
+CREATE TABLE IF NOT EXISTS exported_posts (
+    reddit_id TEXT PRIMARY KEY,
+    report_filename TEXT NOT NULL,
+    exported_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_exported_posts_report
+ON exported_posts(report_filename);
 """
 
 POST_FIELDS = [
@@ -146,6 +155,51 @@ def list_posts(
     return [dict(row) for row in rows]
 
 
+def list_posts_for_report(
+    conn: sqlite3.Connection,
+    report_filename: str,
+    *,
+    min_value_score: int = 1,
+    limit: int = 300,
+) -> list[dict]:
+    """Return new posts plus posts already assigned to this exact report.
+
+    Posts exported by an older report are excluded, while rerunning the same
+    dated report remains idempotent and preserves its existing contents.
+    """
+    rows = conn.execute(
+        """
+        SELECT posts.*
+        FROM posts
+        LEFT JOIN exported_posts ON exported_posts.reddit_id = posts.reddit_id
+        WHERE posts.value_score >= ?
+          AND (exported_posts.reddit_id IS NULL OR exported_posts.report_filename = ?)
+        ORDER BY posts.value_score DESC, posts.num_comments DESC,
+                 posts.score DESC, posts.created_utc DESC
+        LIMIT ?
+        """,
+        (min_value_score, report_filename, limit),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def record_exported_posts(
+    conn: sqlite3.Connection,
+    reddit_ids: Iterable[str],
+    report_filename: str,
+    exported_at: str,
+) -> None:
+    conn.executemany(
+        """
+        INSERT INTO exported_posts (reddit_id, report_filename, exported_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(reddit_id) DO NOTHING
+        """,
+        ((reddit_id, report_filename, exported_at) for reddit_id in reddit_ids),
+    )
+    conn.commit()
+
+
 def metadata(conn: sqlite3.Connection) -> dict:
     channels = conn.execute("SELECT DISTINCT channel FROM posts ORDER BY channel").fetchall()
     subreddits = conn.execute("SELECT DISTINCT subreddit FROM posts ORDER BY lower(subreddit)").fetchall()
@@ -155,4 +209,3 @@ def metadata(conn: sqlite3.Connection) -> dict:
         "channels": [row["channel"] for row in channels],
         "subreddits": [row["subreddit"] for row in subreddits],
     }
-

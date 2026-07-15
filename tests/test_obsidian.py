@@ -68,6 +68,71 @@ class ObsidianExportTests(unittest.TestCase):
             self.assertEqual(output_path, target_dir / "Money Radar Latest.md")
             self.assertIn("Need an app to clean CSV files", output_path.read_text())
 
+    def test_posts_are_not_repeated_in_later_daily_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "money.sqlite3"
+            target_dir = Path(tmp) / "vault"
+            conn = connect(db_path)
+            init_db(conn)
+            upsert_post(conn, {
+                "reddit_id": "once-only",
+                "subreddit": "SaaS",
+                "channel": "business",
+                "title": "Need a billing tool",
+                "selftext": "Manual billing is painful.",
+                "permalink": "https://reddit.com/r/SaaS/comments/once-only/example",
+                "url": "https://reddit.com/r/SaaS/comments/once-only/example",
+                "author": "user",
+                "created_utc": 1783382400,
+                "fetched_at": "2026-07-13T00:00:00+00:00",
+                "value_score": 5,
+            })
+            conn.close()
+
+            first = export_obsidian_markdown(
+                db_path, target_dir, filename="Money Radar 2026-07-14.md"
+            )
+            rerun = export_obsidian_markdown(
+                db_path, target_dir, filename="Money Radar 2026-07-14.md"
+            )
+            next_day = export_obsidian_markdown(
+                db_path, target_dir, filename="Money Radar 2026-07-15.md"
+            )
+
+            self.assertIn("Need a billing tool", first.read_text())
+            self.assertIn("Need a billing tool", rerun.read_text())
+            self.assertNotIn("Need a billing tool", next_day.read_text())
+
+    def test_existing_reports_bootstrap_delivery_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "money.sqlite3"
+            target_dir = Path(tmp) / "vault"
+            target_dir.mkdir()
+            conn = connect(db_path)
+            init_db(conn)
+            upsert_post(conn, {
+                "reddit_id": "historical",
+                "subreddit": "excel",
+                "channel": "productivity",
+                "title": "Previously delivered post",
+                "permalink": "https://reddit.com/r/excel/comments/historical/example",
+                "url": "https://reddit.com/r/excel/comments/historical/example",
+                "created_utc": 1783382400,
+                "fetched_at": "2026-07-13T00:00:00+00:00",
+                "value_score": 5,
+            })
+            conn.close()
+            (target_dir / "Money Radar 2026-07-14.md").write_text(
+                "- Reddit: https://reddit.com/r/excel/comments/historical/example\n",
+                encoding="utf-8",
+            )
+
+            current = export_obsidian_markdown(
+                db_path, target_dir, filename="Money Radar 2026-07-15.md"
+            )
+
+            self.assertNotIn("Previously delivered post", current.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
