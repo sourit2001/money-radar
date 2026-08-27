@@ -57,7 +57,14 @@ class ServerApiTests(unittest.TestCase):
             self.assertEqual(len(payload["posts"]), 1)
             self.assertEqual(payload["meta"]["total"], 1)
 
+            handler.path = "/api/opportunities?min_score=4"
+            handler.wfile = DummyWriter()
+            handler.do_GET()
+            opportunity_payload = json.loads(handler.wfile.content.decode("utf-8"))
+            self.assertEqual(handler.status, 200)
+            self.assertEqual(len(opportunity_payload["opportunities"]), 1)
+            self.assertEqual(opportunity_payload["opportunities"][0]["post_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
-

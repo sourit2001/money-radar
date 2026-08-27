@@ -40,6 +40,16 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
   cd "$REPO_DIR"
 
+  # The local key lives beside this repository's README, is ignored by Git,
+  # and survives fetches because it is an untracked file.
+  DEEPSEEK_ENV="$REPO_DIR/deepseek.env"
+  if [ -r "$DEEPSEEK_ENV" ]; then
+    DEEPSEEK_API_KEY="$(sed -n 's/^DEEPSEEK_API_KEY=//p' "$DEEPSEEK_ENV" | tail -n 1)"
+    if [ -n "$DEEPSEEK_API_KEY" ]; then
+      export DEEPSEEK_API_KEY
+    fi
+  fi
+
   PYTHON="$APP_DIR/.venv/bin/python3"
   if [ ! -x "$PYTHON" ]; then
     PYTHON="python3"
@@ -47,6 +57,9 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
   "$PYTHON" -m money_radar.cli --db "$DB_PATH" fetch
   "$PYTHON" -m money_radar.cli --db "$DB_PATH" refilter --prune
+  if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+    echo "WARNING: DeepSeek key unavailable; source text will be exported without semantic analysis."
+  fi
   "$PYTHON" -m money_radar.cli --db "$DB_PATH" export-obsidian "$VAULT_DIR" --min-score 4 --limit 50 --filename "$REPORT_FILENAME" --bilingual
 
   echo "===== completed ====="

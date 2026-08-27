@@ -14,6 +14,16 @@ from .storage import get_translation, save_translation
 _CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
 
 
+def split_source_sentences(text: object) -> list[str]:
+    """Split a source post into stable units for bilingual inline rendering."""
+    normalized = " ".join(str(text or "").split()).strip()
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", normalized)
+        if sentence.strip()
+    ]
+
+
 def argos_english_to_chinese(text: str) -> str:
     """Translate English text with an installed Argos en->zh package."""
     import argostranslate.translate
@@ -65,6 +75,24 @@ def add_chinese_translations(
             post["selftext_zh"] = translate_cached(
                 conn, post.get("selftext"), translator=translator
             )
+    except (ImportError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+def add_inline_chinese_translations(
+    conn: sqlite3.Connection,
+    posts: list[dict],
+    *,
+    translator: Callable[[str], str] = argos_english_to_chinese,
+) -> bool:
+    """Attach cached sentence translations so English and Chinese stay paired."""
+    try:
+        for post in posts:
+            post["sentence_translations"] = {
+                sentence: translate_cached(conn, sentence, translator=translator)
+                for sentence in split_source_sentences(post.get("selftext"))
+            }
     except (ImportError, RuntimeError, ValueError):
         return False
     return True

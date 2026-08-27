@@ -1,10 +1,6 @@
-const state = {
-  posts: [],
-  meta: { total: 0, channels: [], subreddits: [] },
-};
-
+const state = { opportunities: [], meta: { total: 0, channels: [], subreddits: [] } };
 const els = {
-  posts: document.querySelector("#posts"),
+  opportunities: document.querySelector("#opportunities"),
   summary: document.querySelector("#summary"),
   refresh: document.querySelector("#refresh"),
   channel: document.querySelector("#channel"),
@@ -16,18 +12,8 @@ const els = {
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
   })[char]);
-}
-
-function formatDate(seconds) {
-  if (!seconds) return "unknown date";
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    .format(new Date(seconds * 1000));
 }
 
 function fillSelect(select, values, firstLabel) {
@@ -51,15 +37,15 @@ function queryString() {
   return params.toString();
 }
 
-async function loadPosts() {
-  els.summary.textContent = "Loading Reddit opportunity posts...";
-  const response = await fetch(`/api/posts?${queryString()}`);
+async function loadOpportunities() {
+  els.summary.textContent = "Loading market opportunities...";
+  const response = await fetch(`/api/opportunities?${queryString()}`);
   if (!response.ok) {
-    els.summary.textContent = "Could not load posts from the local API.";
+    els.summary.textContent = "Could not load opportunities from the local API.";
     return;
   }
   const payload = await response.json();
-  state.posts = payload.posts;
+  state.opportunities = payload.opportunities;
   state.meta = payload.meta;
   fillSelect(els.channel, state.meta.channels, "All channels");
   fillSelect(els.subreddit, state.meta.subreddits, "All subreddits");
@@ -68,47 +54,50 @@ async function loadPosts() {
 
 function render() {
   els.scoreLabel.textContent = `${els.minScore.value}+`;
-  els.summary.textContent = `${state.posts.length} shown from ${state.meta.total} saved posts`;
-  if (!state.posts.length) {
-    els.posts.innerHTML = `<div class="empty">No matching posts yet. Try lowering the score filter or running the sample/fetch command.</div>`;
+  els.summary.textContent = `${state.opportunities.length} market themes from ${state.meta.total} saved posts`;
+  if (!state.opportunities.length) {
+    els.opportunities.innerHTML = `<div class="empty">No grouped opportunities yet. Run a fetch or lower the evidence filter.</div>`;
     return;
   }
-  els.posts.innerHTML = state.posts.map((post) => `
-    <article class="post">
-      <div class="post-header">
-        <h2><a href="${escapeHtml(post.permalink)}" target="_blank" rel="noreferrer">${escapeHtml(post.title)}</a></h2>
-        <div class="score">${escapeHtml(post.value_score)}/5</div>
-      </div>
-      <div class="meta">
-        <span>r/${escapeHtml(post.subreddit)}</span>
-        <span>${escapeHtml(post.channel)}</span>
-        <span>${escapeHtml(post.score)} upvotes</span>
-        <span>${escapeHtml(post.num_comments)} comments</span>
-        <span>${formatDate(post.created_utc)}</span>
-      </div>
-      <p class="excerpt">${escapeHtml(post.selftext || post.pain_summary)}</p>
-      <div class="annotation">
-        <div><strong>Pain:</strong> ${escapeHtml(post.pain_summary)}</div>
-        <div class="tags">
-          <span class="tag">${escapeHtml(post.signal)}</span>
-          <span class="tag">${escapeHtml(post.opportunity_type)}</span>
-          ${post.signal_phrase ? `<span class="tag">${escapeHtml(post.signal_phrase)}</span>` : ""}
+  els.opportunities.innerHTML = state.opportunities.map((item) => `
+    <article class="opportunity">
+      <div class="opportunity-header">
+        <div>
+          <div class="eyebrow">${escapeHtml(item.evidence_level)} evidence · ${escapeHtml(item.post_count)} source posts</div>
+          <h2>${escapeHtml(item.title)}</h2>
         </div>
+        <div class="market-score">${escapeHtml(item.market_score)}/10</div>
       </div>
+      <p class="why-now">${escapeHtml(item.why_now)}</p>
+      <div class="evidence-grid">
+        <div><span>Communities</span><strong>${escapeHtml(item.subreddits.join(", "))}</strong></div>
+        <div><span>Paid signals</span><strong>${escapeHtml(item.paid_signal_count)}</strong></div>
+        <div><span>Failed/workaround signals</span><strong>${escapeHtml(item.failed_solution_count)}</strong></div>
+        <div><span>Pain signals</span><strong>${escapeHtml(item.pain_signal_count)}</strong></div>
+      </div>
+      <div class="gap"><strong>Current gap:</strong> ${escapeHtml(item.current_workaround)}</div>
+      <div class="next-action"><strong>Next action:</strong> ${escapeHtml(item.next_action)}</div>
+      <details>
+        <summary>View representative Reddit posts</summary>
+        <div class="source-posts">${item.posts.map((post) => `
+          <a class="source-post" href="${escapeHtml(post.permalink)}" target="_blank" rel="noreferrer">
+            <strong>${escapeHtml(post.title)}</strong>
+            <span>r/${escapeHtml(post.subreddit)} · ${escapeHtml(post.num_comments)} comments</span>
+          </a>
+        `).join("")}</div>
+      </details>
     </article>
   `).join("");
 }
 
 ["change", "input"].forEach((eventName) => {
-  els.channel.addEventListener(eventName, loadPosts);
-  els.subreddit.addEventListener(eventName, loadPosts);
-  els.minScore.addEventListener(eventName, loadPosts);
+  els.channel.addEventListener(eventName, loadOpportunities);
+  els.subreddit.addEventListener(eventName, loadOpportunities);
+  els.minScore.addEventListener(eventName, loadOpportunities);
   els.search.addEventListener(eventName, () => {
     window.clearTimeout(els.search._timer);
-    els.search._timer = window.setTimeout(loadPosts, 180);
+    els.search._timer = window.setTimeout(loadOpportunities, 180);
   });
 });
-
-els.refresh.addEventListener("click", loadPosts);
-loadPosts();
-
+els.refresh.addEventListener("click", loadOpportunities);
+loadOpportunities();

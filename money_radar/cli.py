@@ -12,10 +12,16 @@ from pathlib import Path
 from .annotator import annotate_post
 from .config import DEFAULT_DB_PATH, SUBREDDIT_TO_CHANNEL
 from .filters import assess_opportunity, is_candidate_post
+from .market import (
+    fetch_product_hunt_feed, fetch_toolify_most_used, fetch_toolify_new,
+    render_market_preview,
+)
 from .obsidian import export_obsidian_markdown
 from .reddit import RedditFetchError, clean_html_text, fetch_candidate_posts
 from .server import serve
-from .storage import connect, init_db, upsert_posts
+from .storage import connect, init_db, save_scan_run, upsert_posts
+from .translation import argos_english_to_chinese
+from .semantic_analysis import add_market_product_analyses
 
 
 SAMPLE_POSTS = [
@@ -111,12 +117,18 @@ def command_fetch(args: argparse.Namespace) -> int:
     )
 
     try:
-        posts, failures = fetch_candidate_posts(subreddits=subs)
+        posts, failures, scan_stats = fetch_candidate_posts(subreddits=subs)
     except RedditFetchError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     count = upsert_posts(conn, posts)
-    print(f"\n✅ Stored {count} candidate posts.")
+    save_scan_run(conn, scan_stats)
+    print(
+        f"\n✅ Scanned {scan_stats['raw_items']} feed items "
+        f"({scan_stats['unique_items']} unique) across "
+        f"{scan_stats['sources_succeeded']}/{scan_stats['sources_attempted']} sources; "
+        f"stored {count} candidate posts."
+    )
     if failures:
         print(f"⚠️  {len(failures)} source(s) failed:", file=sys.stderr)
         for failure in failures:
@@ -187,6 +199,40 @@ def command_refilter(args: argparse.Namespace) -> int:
 
 
 def command_export_obsidian(args: argparse.Namespace) -> int:
+    try:
+        market_products = fetch_product_hunt_feed()
+    except RuntimeError as exc:
+        print(f"⚠️ Product Hunt public feed unavailable: {exc}", file=sys.stderr)
+        market_products = []
+    try:
+        toolify_tools = fetch_toolify_most_used()
+    except RuntimeError as exc:
+        print(f"⚠️ Toolify Most Used unavailable: {exc}", file=sys.stderr)
+        toolify_tools = None
+    try:
+        toolify_new = fetch_toolify_new()
+    except RuntimeError as exc:
+        print(f"⚠️ Toolify New unavailable: {exc}", file=sys.stderr)
+        toolify_new = None
+    priority_names = ("salesforce", "hubspot", "jotform", "capcut", "elevenlabs", "turboscribe", "demi")
+    priority_toolify = [
+        tool for tool in (toolify_tools or [])
+        if any(term in tool.get("name", "").lower() for term in priority_names)
+    ][:7]
+    market_terms = ("crm", "sales", "follow", "video", "subtitle", "brand", "prompt", "commission")
+    related_product_hunt = [
+        product for product in market_products
+        if any(term in f"{product.get('title', '')} {product.get('description', '')}".lower() for term in market_terms)
+    ][:5]
+    products_to_analyze = []
+    seen_product_ids = set()
+    for product in market_products[:3] + related_product_hunt + (toolify_new or [])[:3] + priority_toolify:
+        product_id = (product.get("source"), product.get("id"))
+        if product_id in seen_product_ids:
+            continue
+        seen_product_ids.add(product_id)
+        products_to_analyze.append(product)
+    add_market_product_analyses(products_to_analyze)
     output_path = export_obsidian_markdown(
         db_path_from_args(args),
         args.target_dir,
@@ -194,8 +240,37 @@ def command_export_obsidian(args: argparse.Namespace) -> int:
         limit=args.limit,
         filename=args.filename,
         bilingual=args.bilingual,
+        market_products=market_products,
+        toolify_tools=toolify_tools,
+        toolify_new=toolify_new,
+        opportunity_limit=args.opportunity_limit,
     )
     print(f"Exported Obsidian report to {output_path}")
+    return 0
+
+
+def command_market_preview(args: argparse.Namespace) -> int:
+    """Write a source-faithful Product Hunt and AI-market preview."""
+    try:
+        products = fetch_product_hunt_feed()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    try:
+        toolify_tools = fetch_toolify_most_used()
+    except RuntimeError as exc:
+        print(f"⚠️ Toolify Most Used unavailable: {exc}", file=sys.stderr)
+        toolify_tools = None
+    target = Path(args.target_dir).expanduser()
+    target.mkdir(parents=True, exist_ok=True)
+    output_path = target / args.filename
+    output_path.write_text(
+        render_market_preview(
+            products, toolify_tools=toolify_tools, translator=argos_english_to_chinese
+        ),
+        encoding="utf-8",
+    )
+    print(f"Exported market preview to {output_path}")
     return 0
 
 
@@ -231,11 +306,27 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("target_dir", help="Directory where the Markdown report should be written")
     export_parser.add_argument("--min-score", type=int, default=4)
     export_parser.add_argument("--limit", type=int, default=50)
+    export_parser.add_argument(
+        "--opportunity-limit", type=int, default=3,
+        help="Number of daily opportunities to show (1–5, default: 3)",
+    )
     export_parser.add_argument("--filename", default="Money Radar Latest.md")
     export_parser.add_argument(
-        "--bilingual", action="store_true", help="Add offline Chinese translations with Argos"
+        "--bilingual", action="store_true", dest="bilingual", default=True,
+        help="Add offline Chinese translations with Argos (default)"
+    )
+    export_parser.add_argument(
+        "--no-bilingual", action="store_false", dest="bilingual",
+        help="Skip Chinese translations for this export"
     )
     export_parser.set_defaults(func=command_export_obsidian)
+
+    market_parser = subparsers.add_parser(
+        "market-preview", help="Export Product Hunt and AI market validation preview"
+    )
+    market_parser.add_argument("target_dir", help="Directory where the Markdown preview is written")
+    market_parser.add_argument("--filename", default="Money Radar 市场验证预览.md")
+    market_parser.set_defaults(func=command_market_preview)
 
     serve_parser = subparsers.add_parser("serve", help="Run the local web server")
     serve_parser.add_argument("--host", default="127.0.0.1")

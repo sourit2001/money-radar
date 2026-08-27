@@ -292,6 +292,30 @@ def fetch_post_stats(permalink: str) -> dict:
         return {}
 
 
+def fetch_post_comments(permalink: str, limit: int = 3) -> list[dict]:
+    """Fetch a few substantive public comments for a selected report source."""
+    clean_url = permalink.split("?")[0].rstrip("/")
+    body = _rate_limited_fetch(f"{clean_url}.json?limit={max(1, min(limit, 5))}", optional=True)
+    if not body:
+        return []
+    try:
+        children = json.loads(body)[1]["data"]["children"]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+        return []
+    comments = []
+    for child in children:
+        data = child.get("data") or {}
+        text = clean_html_text(data.get("body") or "")
+        if child.get("kind") != "t1" or len(text) < 40 or text in {"[deleted]", "[removed]"}:
+            continue
+        comments.append({
+            "body": text,
+            "permalink": f"https://www.reddit.com{data.get('permalink', '')}",
+            "score": int(data.get("score") or 0),
+        })
+    return sorted(comments, key=lambda item: item["score"], reverse=True)[:limit]
+
+
 def normalize_reddit_post(post: dict, fetched_at: str) -> dict:
     subreddit = post.get("subreddit") or ""
     permalink = post.get("permalink") or ""
@@ -317,7 +341,7 @@ def normalize_reddit_post(post: dict, fetched_at: str) -> dict:
 
 def fetch_candidate_posts(
     subreddits: Iterable[str] | None = None,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[str], dict]:
     """Fetch and filter candidate posts from Reddit RSS feeds.
 
     No API credentials needed.  Uses Reddit's public RSS endpoints via curl.
@@ -327,6 +351,10 @@ def fetch_candidate_posts(
     failures: list[str] = []
     seen_ids: set[str] = set()
     seen_titles: set[str] = set()
+    raw_ids: set[str] = set()
+    details: list[dict] = []
+    raw_items = 0
+    sources_succeeded = 0
 
     subs = list(configured_subreddits() if subreddits is None else subreddits)
     groups = [subs[index:index + 6] for index in range(0, len(subs), 6)]
@@ -337,6 +365,8 @@ def fetch_candidate_posts(
         count = 0
         for raw_post in raw_posts:
             pid = raw_post.get("id", "")
+            if pid:
+                raw_ids.add(pid)
             normalized_title = re.sub(r"\W+", " ", raw_post.get("title", "").lower()).strip()
             if pid in seen_ids or normalized_title in seen_titles:
                 continue
@@ -365,7 +395,10 @@ def fetch_candidate_posts(
             failures.append(str(exc))
             print("FAILED")
         else:
+            raw_items += len(raw_posts)
+            sources_succeeded += 1
             count = collect(raw_posts, search_result=True)
+            details.append({"kind": "search", "label": combined_query, "raw": len(raw_posts), "candidates": count})
             print(f"{len(raw_posts)} posts, {count} new candidates")
         if index < len(query_groups) or groups:
             time.sleep(FETCH_DELAY)
@@ -383,9 +416,23 @@ def fetch_candidate_posts(
             failures.append(str(exc))
             print("FAILED")
         else:
+            raw_items += len(raw_posts)
+            sources_succeeded += 1
             count = collect(raw_posts, search_result=False)
+            details.append({"kind": "feed", "label": label, "raw": len(raw_posts), "candidates": count})
             print(f"{len(raw_posts)} posts, {count} candidates")
         if index < len(groups):
             time.sleep(FETCH_DELAY)
 
-    return posts, failures
+    stats = {
+        "run_at": fetched_at,
+        "source": "reddit",
+        "sources_attempted": len(query_groups) + len(groups),
+        "sources_succeeded": sources_succeeded,
+        "raw_items": raw_items,
+        "unique_items": len(raw_ids),
+        "candidate_items": len(posts),
+        "failures": failures,
+        "details": details,
+    }
+    return posts, failures, stats

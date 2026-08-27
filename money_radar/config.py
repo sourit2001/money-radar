@@ -86,6 +86,10 @@ DEMAND_PATTERNS = {
         "alternative to",
         "best way to",
         "does this exist",
+        "i want to pay for",
+        "i would like to pay for",
+        "i'd pay for",
+        "willing to pay for",
     ],
     "pain": [
         "hate",
@@ -115,6 +119,8 @@ STRONG_INTENT_PHRASES = [
     "tool for", "software for", "app for", "looking for a tool",
     "looking for an app", "looking for software", "looking for a platform",
     "looking for a solution", "alternative to", "does this exist",
+    "i want to pay for", "i would like to pay for", "i'd pay for",
+    "willing to pay for",
 ]
 
 EXPLICIT_OPPORTUNITY_PHRASES = [
@@ -135,6 +141,15 @@ WORKFLOW_TERMS = [
     "dashboard", "tracking", "sync", "integration", "export", "import",
 ]
 
+# Money Radar focuses on digital products an individual developer can ship.
+# Physical-goods requests can also contain the word "tool" and need excluding.
+DIGITAL_SOLUTION_TERMS = [
+    "software", "app", "platform", "saas", "api", "browser extension",
+    "chrome extension", "desktop app", "web app", "integration", "plugin",
+    "workflow", "automation", "automate", "dashboard", "crm", "editor", "sync",
+    "spreadsheet", "tracking",
+]
+
 PROBLEM_CONTEXT_TERMS = [
     "business", "client", "customer", "invoice", "supplier", "team",
     "employee", "agency", "freelance", "budget", "income", "expense",
@@ -153,6 +168,7 @@ PROMOTIONAL_TITLE_PATTERNS = [
     "case study", "lessons learned", "for hire", "ultimate guide",
     "complete guide", "announcement", "before i launch", "would you pay for",
     "here's what", "my results", "upgrade to", "software engineer job",
+    "built ", "quick answer",
     "looking for software engineer",
     "unemployed software engineer", "software engineer opportunities",
 ]
@@ -168,6 +184,10 @@ SUPPLY_POST_MARKERS = [
     "we recently launched", "launched the beta", "test it here",
     "disclosure: i'm part", "introducing ", "built specifically for",
     "i build ai automation", "for context, i'm building",
+    "i'm now building", "im now building",
+    "i'll reply with", "let's see how many", "drop your setup",
+    "what are you actually running", "the best crm for", "customer success manager",
+    "rating across", "if you're searching for",
 ]
 
 MIN_OPPORTUNITY_SCORE = 5
@@ -175,6 +195,7 @@ MIN_OPPORTUNITY_SCORE = 5
 # Search queries for cross-subreddit demand discovery via Reddit search RSS.
 SEARCH_QUERIES = [
     '("looking for software" OR "looking for an app" OR "looking for a tool")',
+    '("I want to pay for" OR "I would like to pay for" OR "I\'d pay for" OR "willing to pay for")',
     '("does anyone know" OR "has anyone found") AND (software OR tool OR workflow)',
     '("I have tried" OR "tried several" OR "none of them") AND (software OR tool OR OCR)',
     '("manual process" OR "currently using a spreadsheet" OR "takes too long") AND (automate OR workflow OR software)',

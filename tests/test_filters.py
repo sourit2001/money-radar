@@ -10,6 +10,18 @@ class FilterTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.signal, "tool_search")
 
+    def test_accepts_explicit_willingness_to_pay(self):
+        post = {
+            "title": "I would like to pay for something that reconciles invoices",
+            "selftext": "I need software that handles this for my business.",
+            "score": 0,
+            "num_comments": 0,
+        }
+        match = detect_signal(post)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.signal, "tool_search")
+        self.assertTrue(is_candidate_post(post))
+
     def test_requires_engagement(self):
         self.assertFalse(passes_engagement({"score": 2, "num_comments": 1}))
         self.assertTrue(passes_engagement({"score": 11, "num_comments": 1}))
@@ -145,6 +157,30 @@ class FilterTests(unittest.TestCase):
         })
         self.assertEqual(direct.tier, "direct")
         self.assertEqual(latent.tier, "latent")
+
+    def test_rejects_physical_product_request(self):
+        assessment = assess_opportunity({
+            "title": "Looking for a tool belt",
+            "selftext": "My budget is $300. Any suggestions?",
+        })
+        self.assertFalse(assessment.eligible)
+        self.assertIn("non-digital product request", assessment.reasons)
+
+    def test_rejects_single_product_bug_report(self):
+        assessment = assess_opportunity({
+            "title": "Has anyone found a fix for random audio in Minimax?",
+            "selftext": "The default workflow is very annoying and I tried the prompt guide.",
+        })
+        self.assertFalse(assessment.eligible)
+
+    def test_rejects_user_profile_promotion_source(self):
+        assessment = assess_opportunity({
+            "subreddit": "u_vendor_account",
+            "title": "How to automate IT offboarding?",
+            "selftext": "Quick answer: buy our software platform.",
+        })
+        self.assertFalse(assessment.eligible)
+        self.assertIn("user-profile promotion source", assessment.reasons)
 
 
 if __name__ == "__main__":

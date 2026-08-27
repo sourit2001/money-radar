@@ -8,6 +8,7 @@ import re
 
 from .config import (
     DEMAND_PATTERNS,
+    DIGITAL_SOLUTION_TERMS,
     EXPLICIT_OPPORTUNITY_PHRASES,
     FAILED_ATTEMPT_TERMS,
     MIN_COMMENTS,
@@ -81,6 +82,9 @@ def assess_opportunity(post: dict) -> OpportunityAssessment:
     if post.get("stickied") or post.get("over_18"):
         return OpportunityAssessment(False, 0, ("blocked post type",), signal_match)
 
+    if str(post.get("subreddit") or "").lower().startswith("u_"):
+        return OpportunityAssessment(False, 0, ("user-profile promotion source",), signal_match)
+
     promo = _first_phrase(title, PROMOTIONAL_TITLE_PATTERNS)
     seo_title = any(
         re.search(pattern, title)
@@ -90,6 +94,7 @@ def assess_opportunity(post: dict) -> OpportunityAssessment:
             r"^what is .+ software\??$",
             r"^how .+ software (?:improves|helps|can)",
             r"^why (?:are|do) businesses .+ software",
+            r"^built\b",
         )
     )
     explicit_question = "?" in title or _first_phrase(
@@ -101,6 +106,8 @@ def assess_opportunity(post: dict) -> OpportunityAssessment:
             "looking for a solution", "alternative to", "does this exist",
             "does anyone know", "has anyone found", "what do you use for",
             "any recommendations", "need a better way",
+            "i want to pay for", "i would like to pay for", "i'd pay for",
+            "willing to pay for",
         ],
     )
     strong_intent = _first_phrase(lead_text, STRONG_INTENT_PHRASES)
@@ -111,6 +118,7 @@ def assess_opportunity(post: dict) -> OpportunityAssessment:
     recurring = _first_phrase(text, RECURRING_TERMS)
     failed_attempt = _first_phrase(text, FAILED_ATTEMPT_TERMS)
     supply_marker = _first_phrase(text, SUPPLY_POST_MARKERS)
+    digital_solution = _first_phrase(text, DIGITAL_SOLUTION_TERMS)
 
     if seo_title:
         return OpportunityAssessment(False, 0, ("SEO/vendor title",), signal_match)
@@ -127,6 +135,11 @@ def assess_opportunity(post: dict) -> OpportunityAssessment:
     if supply_marker and not spreadsheet_workaround:
         return OpportunityAssessment(
             False, 0, (f"product/supply post: {supply_marker}",), signal_match
+        )
+
+    if not digital_solution:
+        return OpportunityAssessment(
+            False, 0, ("non-digital product request",), signal_match
         )
 
     score = 0
@@ -156,7 +169,6 @@ def assess_opportunity(post: dict) -> OpportunityAssessment:
     direct_demand = (
         (bool(strong_intent) and supporting_evidence >= 1 and bool(explicit_question))
         or (bool(opportunity) and supporting_evidence >= 1 and bool(explicit_question))
-        or (bool(pain) and bool(workflow) and bool(explicit_question))
     )
     latent_demand = bool(pain) and bool(workflow) and bool(context or recurring)
     eligible = score >= MIN_OPPORTUNITY_SCORE and (direct_demand or latent_demand)

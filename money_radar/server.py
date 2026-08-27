@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib import parse
 
 from .config import PUBLIC_DIR
+from .opportunities import build_opportunities
 from .storage import connect, list_posts, metadata
 
 
@@ -58,6 +59,18 @@ def make_handler(db_path: str | Path, static_dir: str | Path = PUBLIC_DIR) -> ty
                 )
                 json_response(self, {"posts": posts, "meta": metadata(conn)})
                 return
+            if parsed.path == "/api/opportunities":
+                params = parse.parse_qs(parsed.query)
+                conn = connect(db_path)
+                posts = list_posts(
+                    conn,
+                    channel=params.get("channel", [None])[0] or None,
+                    subreddit=params.get("subreddit", [None])[0] or None,
+                    min_value_score=int(params.get("min_score", ["1"])[0] or 1),
+                    search=params.get("search", [None])[0] or None,
+                )
+                json_response(self, {"opportunities": build_opportunities(posts), "meta": metadata(conn)})
+                return
             if parsed.path == "/api/health":
                 json_response(self, {"ok": True})
                 return
@@ -78,4 +91,3 @@ def serve(db_path: str | Path, host: str = "127.0.0.1", port: int = 8765) -> Non
         print("\nStopping Money Radar.")
     finally:
         server.server_close()
-

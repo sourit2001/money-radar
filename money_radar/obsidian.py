@@ -9,11 +9,14 @@ import re
 from .storage import (
     connect,
     init_db,
-    list_posts_for_report,
+    list_posts,
     metadata,
     record_exported_posts,
 )
-from .translation import add_chinese_translations
+from .reddit import RedditFetchError, fetch_post_comments
+from .market import market_validation_for
+from .opportunities import build_opportunities
+from .semantic_analysis import add_deepseek_analyses, add_deepseek_comment_summaries
 
 
 _REDDIT_ID_PATTERN = re.compile(r"reddit\.com/(?:r/[^/]+/)?comments/([^/?#]+)", re.IGNORECASE)
@@ -64,14 +67,11 @@ def render_obsidian_markdown(posts: list[dict], *, total_saved: int, min_score: 
         return "\n".join(lines)
 
     for index, post in enumerate(posts, start=1):
-        title = _escape_markdown(post.get("title"))
-        title_zh = _escape_markdown(post.get("title_zh"))
         permalink = post.get("permalink") or post.get("url") or ""
         lines.extend(
             [
-                f"## {index}. {title}",
+                f"## {index}. 需求来源 {index}",
                 "",
-                *([f"**中文标题**：{title_zh}", ""] if title_zh and title_zh != title else []),
                 f"- Score / 评分: {post.get('value_score', 1)}/5",
                 f"- Source / 来源: r/{_escape_markdown(post.get('subreddit'))} / {_escape_markdown(post.get('channel'))}",
                 f"- Posted / 发布时间: {_format_post_date(post.get('created_utc'))}",
@@ -85,18 +85,199 @@ def render_obsidian_markdown(posts: list[dict], *, total_saved: int, min_score: 
         if phrase:
             lines.append(f"- Phrase: {phrase}")
         pain = _compact_text(post.get("pain_summary"), limit=360)
-        pain_zh = _compact_text(post.get("pain_summary_zh"), limit=360)
         if pain:
-            lines.extend(["", f"**Pain / 痛点（原文）**：{pain}"])
-        if pain_zh and pain_zh != pain:
-            lines.append(f"**痛点（中文）**：{pain_zh}")
-        body = _compact_text(post.get("selftext"), limit=900)
-        body_zh = _compact_text(post.get("selftext_zh"), limit=900)
-        if body and body != pain:
-            lines.extend(["", "**Post / 帖子原文**", "", body])
-        if body_zh and body_zh not in {body, pain_zh}:
-            lines.extend(["", "**中文翻译**", "", body_zh])
+            lines.extend(["", f"**Pain / 痛点摘要**：{pain}"])
         lines.append("")
+
+    return "\n".join(lines)
+
+
+def _brief_line(brief: dict[str, str], key: str, fallback: str) -> str:
+    return " ".join(str(brief.get(key) or fallback).split())
+
+
+def _render_market_product(product: dict, *, heading_level: int = 4) -> list[str]:
+    name = _escape_markdown(product.get("name") or product.get("title") or "未命名产品")
+    url = product.get("url") or ""
+    analysis = product.get("analysis") or {}
+    source = "Product Hunt 新品" if product.get("source") == "product_hunt" else (
+        "Toolify 新收录" if product.get("list_type") == "new" else "Toolify Most Used"
+    )
+    rank = f" · 榜单 #{product['rank']}" if product.get("rank") else ""
+    description = _compact_text(product.get("description"), limit=500) or "公开简介未说明。"
+    lines = [
+        f"{'#' * heading_level} [{name}]({url})",
+        "",
+        f"- **来源**：{source}{rank}",
+        f"- **公开简介**：{description}",
+        f"- **解决什么问题**：{analysis.get('problem') or '等待模型依据公开简介分析。'}",
+        f"- **面向谁**：{analysis.get('target_user') or '公开简介未说明。'}",
+        f"- **已经覆盖的能力**：{analysis.get('coverage') or '公开简介未说明。'}",
+        f"- **个人开发者可研究的缺口**：{analysis.get('solo_gap') or '仅凭简介无法判断。'}",
+        f"- **证据限制**：{analysis.get('evidence_limit') or '这里只有榜单/发布简介，没有用户评论，不能判断满意度。'}",
+    ]
+    if product.get("monthly_visitors"):
+        lines.append(f"- **Toolify 月访问量**：{product['monthly_visitors']}")
+    if product.get("added_on"):
+        lines.append(f"- **Toolify 收录时间**：{product['added_on']}")
+    if product.get("review_count") is not None and product.get("source") == "toolify":
+        lines.append(f"- **Toolify 评论数**：{product.get('review_count', 0)}；评论正文未公开抓取，不能代替用户反馈。")
+    lines.append("")
+    return lines
+
+
+def _report_opportunities(
+    posts: list[dict], *, require_market_validation: bool = False, limit: int = 3
+) -> list[dict]:
+    """Choose only the few candidates that belong in a concise daily brief."""
+    all_opportunities = build_opportunities(posts, limit=50)
+    repeated = [item for item in all_opportunities if item["post_count"] >= 2]
+    direct_signals = [
+        item for item in all_opportunities
+        if item["post_count"] == 1
+        and item["direct_signal_count"]
+        and (item["failed_solution_count"] or item["paid_signal_count"])
+    ]
+    # The free phase only promotes themes that have a matching AI-market
+    # validation category.  Everything else stays in the observation pool
+    # until Product Hunt/App-review evidence is available.
+    candidates = repeated + direct_signals
+    if require_market_validation:
+        # A repeated theme can become an "already validated direction" when
+        # it matches a market category.  A singleton can still be shown as a
+        # clearly labelled research lead only when it maps to a named job and
+        # carries direct demand plus a failed alternative or price signal.
+        candidates = [
+            item for item in candidates
+            if not item["key"].startswith("signal:")
+            and (
+                item["post_count"] >= 2
+                or (item["direct_signal_count"] and (item["failed_solution_count"] or item["paid_signal_count"]))
+            )
+        ]
+        candidates.sort(
+            key=lambda item: (
+                item["post_count"] >= 2,
+                bool(market_validation_for(item["posts"], [])["watch"]),
+                item["market_score"],
+            ),
+            reverse=True,
+        )
+    return candidates[:max(1, min(limit, 5))]
+
+
+def render_opportunity_report(
+    posts: list[dict], *, total_saved: int, min_score: int,
+    market_products: list[dict] | None = None, opportunity_limit: int = 3,
+    toolify_tools: list[dict] | None = None,
+    toolify_new: list[dict] | None = None,
+    scan_stats: dict | None = None,
+) -> str:
+    """Render a market-opportunity-first report without raw source text."""
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    opportunities = _report_opportunities(
+        posts, require_market_validation=market_products is not None,
+        limit=opportunity_limit,
+    )
+    lines = [
+        "# Money Radar 市场机会日报",
+        "",
+        f"> {generated_at} · 只显示需求明确、且个人开发者值得进一步验证的 1–3 条。",
+        "",
+    ]
+    if scan_stats:
+        lines.extend([
+            "## 本次扫描审计",
+            "",
+            f"- **Reddit 来源**：成功 {scan_stats.get('sources_succeeded', 0)}/{scan_stats.get('sources_attempted', 0)}",
+            f"- **读到的帖子**：{scan_stats.get('raw_items', 0)} 条；去重后 {scan_stats.get('unique_items', 0)} 条",
+            f"- **进入候选池**：{scan_stats.get('candidate_items', 0)} 条",
+            f"- **Product Hunt 新品**：{len(market_products or [])} 个",
+            f"- **Toolify Most Used**：{len(toolify_tools or [])} 个；**Toolify New**：{len(toolify_new or [])} 个",
+            "",
+        ])
+    if not opportunities:
+        lines.extend([
+            "今天没有满足“明确需求 + 失败替代方案/付费意愿”的候选。",
+            "",
+            "不为凑内容推荐项目；原始帖子继续留在观察池。",
+            "",
+        ])
+        return "\n".join(lines)
+
+    for index, item in enumerate(opportunities, start=1):
+        analysis = item["analysis"]
+        market = market_validation_for(
+            item["posts"], market_products or [], toolify_tools=toolify_tools
+        )
+        watch = market["watch"]
+        lines.extend([
+            f"## {index}. {_escape_markdown(item['title'])}",
+            "",
+            f"**结论**：{analysis['verification_label']} · 个人开发可行性待补充应用评论后确认",
+            "",
+            f"- **使用场景**：{analysis['use_case']}",
+            f"- **用户痛点**：{analysis['pain']}",
+            f"- **现有替代**：{analysis['alternatives']}",
+            f"- **可切入首版**：{analysis['build']}",
+            f"- **需求复现**：{item['post_count']} 条 Reddit 原帖，来自 {len(item['subreddits'])} 个社区；失败替代方案 {item['failed_solution_count']} 条。",
+            f"- **付费证据**：直接愿意付费 {item['paid_signal_count']} 条；价格上限/拒绝 {item['price_ceiling_count']} 条。两者不混算。",
+            f"- **为什么值得研究**：{analysis['research_reason']}",
+            f"- **用户规模判断**：{analysis['scale_status']}",
+            f"- **增长判断**：{analysis['growth_status']}",
+        ])
+        if watch:
+            lines.append(f"- **榜单市场验证**：{watch['market_evidence']}（{'、'.join(f'[{source["name"]}]({source["url"]})' for source in market['sources'][1:])}）")
+            if market["toolify_tools"]:
+                links = "、".join(f"[{tool['name']}]({tool['url']})" for tool in market["toolify_tools"])
+                lines.append(f"- **Toolify 同类上榜**：{links}。这只证明同类工具有网站流量，不能证明该痛点已被解决。")
+            elif market["toolify_checked"]:
+                lines.append("- **Toolify 核验**：已读取 Most Used 榜单，但未找到与此工作流直接匹配的工具；不把无关上榜当证据。")
+            else:
+                lines.append("- **Toolify 核验**：本次未能读取 Most Used 榜单，因此不使用它作为本次证据。")
+        else:
+            lines.append("- **榜单市场验证**：当前没有与该工作流精确匹配的免费榜单证据，保持观察。")
+        if market["products"]:
+            lines.append("- **Product Hunt 验证**：找到与该工作流相邻的近期发布，具体覆盖如下。")
+        else:
+            lines.append("- **Product Hunt 验证**：当前公开 feed 没有同一工作流的匹配产品；不能用无关产品凑证据。")
+        concrete_products = [*market.get("toolify_tools", []), *market.get("products", [])]
+        if concrete_products:
+            lines.extend(["", "### 已有具体方案", ""])
+            for product in concrete_products:
+                lines.extend(_render_market_product(product, heading_level=4))
+        lines.extend(["### 证据来源", ""])
+        for index, post in enumerate(item["posts"], start=1):
+            permalink = post.get("permalink") or post.get("url") or ""
+            brief = post.get("semantic_brief") or {}
+            lines.extend([
+                f"- **来源 {index}**：[查看 Reddit 帖子]({permalink})" if permalink else f"- **来源 {index}**：链接不可用",
+                f"- **场景**：{_brief_line(brief, 'scenario', '原帖未充分说明具体使用场景。')}",
+                f"- **当前做法 / 工具**：{_brief_line(brief, 'current_workflow', '原帖未说明具体工具或当前做法。')}",
+                f"- **痛点**：{_brief_line(brief, 'pain', '原帖没有给出可复核的具体痛点。')}",
+                f"- **槽点 / 缺口**：{_brief_line(brief, 'friction', '原帖未充分说明现有方案为什么不够。')}",
+                f"- **用户想要什么**：{_brief_line(brief, 'user_wants', '原帖未明确提出理想结果。')}",
+                f"- **可验证首版**：{_brief_line(brief, 'mvp', '仅凭这一帖无法确定首版功能边界。')}",
+                f"- **证据边界**：{_brief_line(brief, 'evidence_boundary', '这是一条单独用户证据，不能据此推断市场规模。')}",
+                "",
+            ])
+            comments = post.get("comments") or []
+            lines.extend([f"- **评论共识**：{post.get('comment_summary') or '没有获取到可分析的公开评论。'}"])
+            for comment in comments:
+                lines.append(f"  - [查看评论]({comment['permalink']})")
+            lines.append("")
+        lines.append("")
+
+    observed = [*(market_products or [])[:3], *(toolify_new or [])[:3]]
+    if observed:
+        lines.extend([
+            "## 今日外部产品观察",
+            "",
+            "这些产品不一定对应上面的 Reddit 需求，但它们代表今天新增或正在被关注的具体方案。",
+            "",
+        ])
+        for product in observed:
+            lines.extend(_render_market_product(product, heading_level=3))
 
     return "\n".join(lines)
 
@@ -108,7 +289,11 @@ def export_obsidian_markdown(
     min_score: int = 4,
     limit: int = 50,
     filename: str = "Money Radar Latest.md",
-    bilingual: bool = False,
+    bilingual: bool = True,
+    market_products: list[dict] | None = None,
+    opportunity_limit: int = 3,
+    toolify_tools: list[dict] | None = None,
+    toolify_new: list[dict] | None = None,
 ) -> Path:
     target = Path(target_dir).expanduser()
     target.mkdir(parents=True, exist_ok=True)
@@ -132,26 +317,48 @@ def export_obsidian_markdown(
                 datetime.fromtimestamp(report_path.stat().st_mtime, tz=timezone.utc).isoformat(),
             )
 
-    posts = list_posts_for_report(
+    # A source post is evidence, not a delivered recommendation.  Older raw
+    # reports recorded source IDs in exported_posts; using that history here
+    # would make a newer, better opportunity model blind to the whole corpus.
+    # Opportunity-level de-duplication belongs to opportunity keys, not this
+    # source-post delivery history.
+    posts = list_posts(
         conn,
-        filename,
         min_value_score=min_score,
-        limit=limit,
+        limit=max(limit * 20, 300),
     )
     if bilingual:
-        add_chinese_translations(conn, posts)
+        # Kept for CLI/backward compatibility. The daily report intentionally
+        # does not expose raw source text or translations.
+        selected_posts = [
+            post for item in _report_opportunities(
+                posts, require_market_validation=market_products is not None,
+                limit=opportunity_limit,
+            ) for post in item["posts"]
+        ]
+        has_semantic_analysis = add_deepseek_analyses(conn, selected_posts)
+        if has_semantic_analysis:
+            for post in selected_posts:
+                try:
+                    post["comments"] = fetch_post_comments(post.get("permalink") or "")
+                except RedditFetchError:
+                    post["comments"] = []
+            add_deepseek_comment_summaries(selected_posts)
     meta = metadata(conn)
 
     output_path = target / filename
     output_path.write_text(
-        render_obsidian_markdown(posts, total_saved=meta["total"], min_score=min_score),
+        render_opportunity_report(
+            posts, total_saved=meta["total"], min_score=min_score,
+            market_products=market_products, opportunity_limit=opportunity_limit,
+            toolify_tools=toolify_tools,
+            toolify_new=toolify_new,
+            scan_stats=meta.get("latest_reddit_scan"),
+        ),
         encoding="utf-8",
     )
-    record_exported_posts(
-        conn,
-        (post["reddit_id"] for post in posts),
-        filename,
-        datetime.now(timezone.utc).isoformat(),
-    )
+    # Do not record source posts as "delivered" for opportunity reports.
+    # The same Reddit/App/Product Hunt evidence may legitimately support a
+    # later opportunity as market validation improves.
     conn.close()
     return output_path

@@ -50,6 +50,27 @@ CREATE TABLE IF NOT EXISTS translations (
     created_at TEXT NOT NULL,
     PRIMARY KEY (source_hash, target_language)
 );
+
+CREATE TABLE IF NOT EXISTS semantic_analyses (
+    source_hash TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    analysis_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (source_hash, model, prompt_version)
+);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+    run_at TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    sources_attempted INTEGER NOT NULL,
+    sources_succeeded INTEGER NOT NULL,
+    raw_items INTEGER NOT NULL,
+    unique_items INTEGER NOT NULL,
+    candidate_items INTEGER NOT NULL,
+    failures_json TEXT NOT NULL DEFAULT '[]',
+    details_json TEXT NOT NULL DEFAULT '[]'
+);
 """
 
 POST_FIELDS = [
@@ -241,6 +262,68 @@ def save_translation(
     conn.commit()
 
 
+def get_semantic_analysis(
+    conn: sqlite3.Connection, source_hash: str, model: str, prompt_version: str
+) -> str | None:
+    row = conn.execute(
+        """SELECT analysis_json FROM semantic_analyses
+           WHERE source_hash=? AND model=? AND prompt_version=?""",
+        (source_hash, model, prompt_version),
+    ).fetchone()
+    return row["analysis_json"] if row else None
+
+
+def save_semantic_analysis(
+    conn: sqlite3.Connection, source_hash: str, model: str, prompt_version: str,
+    analysis_json: str, created_at: str,
+) -> None:
+    conn.execute(
+        """INSERT INTO semantic_analyses
+           (source_hash, model, prompt_version, analysis_json, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(source_hash, model, prompt_version) DO UPDATE SET
+             analysis_json=excluded.analysis_json, created_at=excluded.created_at""",
+        (source_hash, model, prompt_version, analysis_json, created_at),
+    )
+    conn.commit()
+
+
+def save_scan_run(conn: sqlite3.Connection, stats: dict) -> None:
+    conn.execute(
+        """INSERT INTO scan_runs
+           (run_at, source, sources_attempted, sources_succeeded, raw_items,
+            unique_items, candidate_items, failures_json, details_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(run_at) DO UPDATE SET
+             sources_succeeded=excluded.sources_succeeded,
+             raw_items=excluded.raw_items, unique_items=excluded.unique_items,
+             candidate_items=excluded.candidate_items,
+             failures_json=excluded.failures_json, details_json=excluded.details_json""",
+        (
+            stats["run_at"], stats.get("source", "reddit"),
+            int(stats.get("sources_attempted") or 0),
+            int(stats.get("sources_succeeded") or 0),
+            int(stats.get("raw_items") or 0), int(stats.get("unique_items") or 0),
+            int(stats.get("candidate_items") or 0),
+            json.dumps(stats.get("failures") or [], ensure_ascii=False),
+            json.dumps(stats.get("details") or [], ensure_ascii=False),
+        ),
+    )
+    conn.commit()
+
+
+def latest_scan_run(conn: sqlite3.Connection, source: str = "reddit") -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM scan_runs WHERE source=? ORDER BY run_at DESC LIMIT 1", (source,)
+    ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["failures"] = json.loads(result.pop("failures_json") or "[]")
+    result["details"] = json.loads(result.pop("details_json") or "[]")
+    return result
+
+
 def metadata(conn: sqlite3.Connection) -> dict:
     channels = conn.execute("SELECT DISTINCT channel FROM posts ORDER BY channel").fetchall()
     subreddits = conn.execute("SELECT DISTINCT subreddit FROM posts ORDER BY lower(subreddit)").fetchall()
@@ -249,4 +332,5 @@ def metadata(conn: sqlite3.Connection) -> dict:
         "total": total,
         "channels": [row["channel"] for row in channels],
         "subreddits": [row["subreddit"] for row in subreddits],
+        "latest_reddit_scan": latest_scan_run(conn),
     }
