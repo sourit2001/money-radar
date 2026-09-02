@@ -127,10 +127,23 @@ def _render_market_product(product: dict, *, heading_level: int = 4) -> list[str
 
 
 def _report_opportunities(
-    posts: list[dict], *, require_market_validation: bool = False, limit: int = 3
+    posts: list[dict], *, require_market_validation: bool = False, limit: int = 3,
+    require_semantic: bool = True,
 ) -> list[dict]:
     """Choose only the few candidates that belong in a concise daily brief."""
     all_opportunities = build_opportunities(posts, limit=50)
+    # A rule-based cluster is not enough for a delivered conclusion. Every
+    # source in it needs a real source-grounded brief; otherwise keep it in the
+    # observation pool instead of rendering fabricated "未说明" fields.
+    if require_semantic:
+        all_opportunities = [
+            item for item in all_opportunities
+            if all(
+                any(str((post.get("semantic_brief") or {}).get(key) or "").strip()
+                    for key in ("scenario", "pain", "user_wants"))
+                for post in item["posts"]
+            )
+        ]
     repeated = [item for item in all_opportunities if item["post_count"] >= 2]
     direct_signals = [
         item for item in all_opportunities
@@ -214,17 +227,17 @@ def render_opportunity_report(
         lines.extend([
             f"## {index}. {_escape_markdown(item['title'])}",
             "",
-            f"**结论**：{analysis['verification_label']} · 个人开发可行性待补充应用评论后确认",
+            f"**结论**：{analysis['verification_label']}",
             "",
-            f"- **使用场景**：{analysis['use_case']}",
-            f"- **用户痛点**：{analysis['pain']}",
-            f"- **现有替代**：{analysis['alternatives']}",
-            f"- **可切入首版**：{analysis['build']}",
+        ])
+        for label, key in (("使用场景", "use_case"), ("用户痛点", "pain"),
+                           ("现有做法 / 替代", "alternatives"), ("用户明确想要", "build")):
+            if analysis.get(key):
+                lines.append(f"- **{label}**：{analysis[key]}")
+        lines.extend([
             f"- **需求复现**：{item['post_count']} 条 Reddit 原帖，来自 {len(item['subreddits'])} 个社区；失败替代方案 {item['failed_solution_count']} 条。",
             f"- **付费证据**：直接愿意付费 {item['paid_signal_count']} 条；价格上限/拒绝 {item['price_ceiling_count']} 条。两者不混算。",
             f"- **为什么值得研究**：{analysis['research_reason']}",
-            f"- **用户规模判断**：{analysis['scale_status']}",
-            f"- **增长判断**：{analysis['growth_status']}",
         ])
         if watch:
             lines.append(f"- **榜单市场验证**：{watch['market_evidence']}（{'、'.join(f'[{source["name"]}]({source["url"]})' for source in market['sources'][1:])}）")
@@ -252,17 +265,19 @@ def render_opportunity_report(
             brief = post.get("semantic_brief") or {}
             lines.extend([
                 f"- **来源 {index}**：[查看 Reddit 帖子]({permalink})" if permalink else f"- **来源 {index}**：链接不可用",
-                f"- **场景**：{_brief_line(brief, 'scenario', '原帖未充分说明具体使用场景。')}",
-                f"- **当前做法 / 工具**：{_brief_line(brief, 'current_workflow', '原帖未说明具体工具或当前做法。')}",
-                f"- **痛点**：{_brief_line(brief, 'pain', '原帖没有给出可复核的具体痛点。')}",
-                f"- **槽点 / 缺口**：{_brief_line(brief, 'friction', '原帖未充分说明现有方案为什么不够。')}",
-                f"- **用户想要什么**：{_brief_line(brief, 'user_wants', '原帖未明确提出理想结果。')}",
-                f"- **可验证首版**：{_brief_line(brief, 'mvp', '仅凭这一帖无法确定首版功能边界。')}",
-                f"- **证据边界**：{_brief_line(brief, 'evidence_boundary', '这是一条单独用户证据，不能据此推断市场规模。')}",
                 "",
             ])
+            for label, key in (("场景", "scenario"), ("当前做法 / 工具", "current_workflow"),
+                               ("痛点", "pain"), ("槽点 / 缺口", "friction"),
+                               ("用户想要什么", "user_wants"), ("可验证首版", "mvp"),
+                               ("证据边界", "evidence_boundary")):
+                value = _brief_line(brief, key, "")
+                if value:
+                    lines.append(f"- **{label}**：{value}")
+            lines.append("")
             comments = post.get("comments") or []
-            lines.extend([f"- **评论共识**：{post.get('comment_summary') or '没有获取到可分析的公开评论。'}"])
+            if comments and post.get("comment_summary"):
+                lines.extend([f"- **评论补充**：{post['comment_summary']}"])
             for comment in comments:
                 lines.append(f"  - [查看评论]({comment['permalink']})")
             lines.append("")
@@ -333,16 +348,18 @@ def export_obsidian_markdown(
         selected_posts = [
             post for item in _report_opportunities(
                 posts, require_market_validation=market_products is not None,
-                limit=opportunity_limit,
+                limit=opportunity_limit, require_semantic=False,
             ) for post in item["posts"]
         ]
+        # Fetch the evidence first. The post analysis must not be a gate that
+        # silently prevents comment evidence from reaching the model.
+        for post in selected_posts:
+            try:
+                post["comments"] = fetch_post_comments(post.get("permalink") or "", limit=8)
+            except RedditFetchError:
+                post["comments"] = []
         has_semantic_analysis = add_deepseek_analyses(conn, selected_posts)
         if has_semantic_analysis:
-            for post in selected_posts:
-                try:
-                    post["comments"] = fetch_post_comments(post.get("permalink") or "")
-                except RedditFetchError:
-                    post["comments"] = []
             add_deepseek_comment_summaries(selected_posts)
     meta = metadata(conn)
 

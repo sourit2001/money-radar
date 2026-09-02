@@ -17,7 +17,7 @@ from .translation import split_source_sentences
 
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_MODEL = "deepseek-v4-flash"
-PROMPT_VERSION = "source-grounded-brief-v3"
+PROMPT_VERSION = "source-grounded-brief-v4"
 
 
 class SemanticAnalysisError(RuntimeError):
@@ -50,15 +50,15 @@ Return JSON only, with this exact shape:
 {{"annotations":[{{"sentence_id":1}}],"brief":{{"scenario":"...","current_workflow":"...","pain":"...","friction":"...","user_wants":"...","mvp":"...","evidence_boundary":"..."}}}}
 
 Select only 1 to 3 sentences that materially affect a product decision. Each
-annotation must contain exactly one sentence_id and nothing else. The brief must be
-concise Chinese and explain the entire post: concrete user scenario; current workflow
-and named tools (write '原帖未说明具体工具' if absent); the painful step; what makes the
-current approach frustrating or insufficient; what the user explicitly wants; the
-smallest viable product boundary; and what this one post does NOT prove. Each field is
-one or two plain sentences. A price complaint is only a price constraint; never call it
-willingness to pay unless the post explicitly says the user will pay. Use only facts
-stated in this post. Do not invent user counts, competitor facts, payment intent, or
-market size."""
+annotation must contain exactly one sentence_id and nothing else. Use the title and
+the complete post body, not generic knowledge. Extract concrete details such as named
+tools, country, workflow steps, failed alternatives, constraints, requested outcome,
+and explicit payment language when present. The brief must be concise Chinese and
+contain only facts supported by the source. Omit unsupported details rather than
+filling them with generic wording. Each field is one short sentence. A price complaint
+is only a price constraint; never call it willingness to pay unless the post explicitly
+says the user will pay. Do not invent user counts, competitor facts, payment intent,
+market size, or conclusions from the subreddit name."""
 
 
 def _parse(content: str, sentences: list[str]) -> tuple[dict[str, str], dict[str, str]]:
@@ -77,18 +77,19 @@ def _parse(content: str, sentences: list[str]) -> tuple[dict[str, str], dict[str
         if isinstance(sentence_id, int) and 1 <= sentence_id <= len(sentences):
             annotations[sentences[sentence_id - 1]] = "selected"
     field_defaults = {
-        "scenario": "原帖未充分说明具体使用场景。",
-        "current_workflow": "原帖未说明具体工具或当前做法。",
-        "pain": "原帖没有给出可复核的具体痛点。",
-        "friction": "原帖未充分说明现有方案为什么不够。",
-        "user_wants": "原帖未明确提出理想结果。",
-        "mvp": "仅凭这一帖无法确定首版功能边界。",
-        "evidence_boundary": "这是一条单独用户证据，不能据此推断市场规模。",
+        "scenario": "",
+        "current_workflow": "",
+        "pain": "",
+        "friction": "",
+        "user_wants": "",
+        "mvp": "",
+        "evidence_boundary": "",
     }
-    brief = {
-        key: " ".join(str((payload.get("brief") or {}).get(key) or default).split())[:360]
-        for key, default in field_defaults.items()
-    }
+    brief = {}
+    for key, default in field_defaults.items():
+        value = " ".join(str((payload.get("brief") or {}).get(key) or default).split())[:360]
+        if value:
+            brief[key] = value
     return annotations, brief
 
 
@@ -174,22 +175,23 @@ def add_deepseek_comment_summaries(
     for post in posts:
         comments = post.get("comments") or []
         if not comments:
-            post["comment_summary"] = "没有获取到可分析的公开评论；不能据此判断社区是否认同该需求。"
+            post["comment_summary"] = ""
             continue
         quoted = "\n".join(f"{index + 1}. {comment['body']}" for index, comment in enumerate(comments))
         prompt = f"""Summarize these Reddit comments about the source post below in concise Chinese.
 Source title: {post.get('title', '')}
 Comments:\n{quoted}
 
-Return JSON only: {{"summary":"..."}}. State only whether comments corroborate,
-challenge, or add a concrete alternative to the post's need. Do not infer market size,
-do not call a comment payment intent unless it explicitly says so, and mention disagreement
-when present."""
+Return JSON only: {{"summary":"..."}}. Write at most two concise Chinese sentences.
+Name concrete tools, workarounds, failures, requested features, or disagreement when
+the comments provide them. If comments add no useful evidence, say so briefly. State
+only what these comments support. Do not infer market size, and do not call a comment
+payment intent unless it explicitly says so."""
         try:
             payload = json.loads(caller(api_key, model, prompt).strip().removeprefix("```json").removesuffix("```").strip())
-            post["comment_summary"] = " ".join(str(payload.get("summary") or "").split()) or "评论没有提供可用的验证结论。"
+            post["comment_summary"] = " ".join(str(payload.get("summary") or "").split())
         except (SemanticAnalysisError, json.JSONDecodeError):
-            post["comment_summary"] = "评论分析暂时不可用；请直接查看下方评论链接。"
+            post["comment_summary"] = ""
     return True
 
 

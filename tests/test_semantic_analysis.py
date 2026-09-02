@@ -22,6 +22,8 @@ class SemanticAnalysisTests(unittest.TestCase):
             conn = connect(f"{tmp}/radar.sqlite3")
             init_db(conn)
             self.assertTrue(add_deepseek_analyses(conn, posts, api_key="test", caller=caller))
+            self.assertIn("Subtitle workflow", calls[0][2])
+            self.assertIn("Manual timing takes too long.", calls[0][2])
             self.assertEqual(posts[0]["semantic_annotations"], {
                 "Manual timing takes too long.": "selected"
             })
@@ -47,3 +49,14 @@ class SemanticAnalysisTests(unittest.TestCase):
             products, api_key="test", caller=lambda *_: json.dumps(response, ensure_ascii=False)
         ))
         self.assertEqual(products[0]["analysis"]["problem"], "自动匹配发票。")
+
+    def test_unsupported_brief_fields_are_not_filled_with_fake_defaults(self):
+        def caller(*_):
+            return json.dumps({"annotations": [], "brief": {"scenario": "用户在媒体团队管理多平台发布。"}})
+
+        posts = [{"title": "Publishing", "selftext": "I manage publishing."}]
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = connect(f"{tmp}/radar.sqlite3")
+            init_db(conn)
+            self.assertTrue(add_deepseek_analyses(conn, posts, api_key="test", caller=caller))
+            self.assertEqual(posts[0]["semantic_brief"], {"scenario": "用户在媒体团队管理多平台发布。"})

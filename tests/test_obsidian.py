@@ -159,7 +159,9 @@ class ObsidianExportTests(unittest.TestCase):
 
             self.assertEqual(output_path, target_dir / "Money Radar Latest.md")
             self.assertIn("市场机会日报", output_path.read_text())
-            self.assertIn("https://reddit.com/r/excel/comments/abc", output_path.read_text())
+            output = output_path.read_text()
+            self.assertIn("今天没有满足", output)
+            self.assertNotIn("原帖未说明", output)
 
     def test_opportunity_reports_reuse_source_evidence_in_later_reports(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,9 +207,9 @@ class ObsidianExportTests(unittest.TestCase):
                 db_path, target_dir, filename="Money Radar 2026-07-15.md"
             )
 
-            self.assertIn("https://reddit.com/r/SaaS/comments/once-only/example", first.read_text())
-            self.assertIn("https://reddit.com/r/SaaS/comments/once-only/example", rerun.read_text())
-            self.assertIn("https://reddit.com/r/SaaS/comments/once-only/example", next_day.read_text())
+            self.assertIn("今天没有满足", first.read_text())
+            self.assertIn("今天没有满足", rerun.read_text())
+            self.assertIn("今天没有满足", next_day.read_text())
 
     def test_existing_raw_reports_do_not_hide_opportunity_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,7 +240,8 @@ class ObsidianExportTests(unittest.TestCase):
                 db_path, target_dir, filename="Money Radar 2026-07-15.md"
             )
 
-            self.assertIn("previously delivered invoices", current.read_text())
+            self.assertIn("今天没有满足", current.read_text())
+            self.assertNotIn("previously delivered invoices", current.read_text())
 
 
 if __name__ == "__main__":
